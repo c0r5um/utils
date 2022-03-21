@@ -1,0 +1,88 @@
+#!/usr/bin/env/perl -w
+use strict;
+use Data::Dumper;
+
+use POSIX qw(strftime);
+use Sys::MemInfo qw(totalmem freemem);
+use Fcntl qw(SEEK_SET);
+
+my $iface_name = 'eth0';
+
+my $ip4 = ( split( ' ', `ip -4 a show dev $iface_name` ) )[14];
+my $ip6 = ( split( ' ', `ip -6 a show dev $iface_name` ) )[10];
+
+open my $loadavg_fh, '<', '/proc/loadavg' or die "$!";
+open my $rx_fh, '<', "/sys/class/net/$iface_name/statistics/rx_bytes"
+    or die "$!";
+open my $tx_fh, '<', "/sys/class/net/$iface_name/statistics/tx_bytes"
+    or die "$!";
+
+chomp(
+    my $rx = do {
+        local $/;
+        <$rx_fh>;
+        }
+);
+
+chomp(
+    my $tx = do {
+        local $/;
+        <$tx_fh>;
+        }
+);
+
+seek $rx_fh, 0, SEEK_SET;
+seek $tx_fh, 0, SEEK_SET;
+
+sub ifstat() {
+    chomp(
+        my $new_rx = do {
+            local $/;
+            <$rx_fh>;
+            }
+    );
+    chomp(
+        my $new_tx = do {
+            local $/;
+            <$tx_fh>;
+            }
+    );
+
+    my $rx_KBytes = ( ( $new_rx - $rx ) / 1024 );
+    my $tx_KBytes = ( ( $new_tx - $tx ) / 1024 );
+
+    $rx = $new_rx;
+    $tx = $new_tx;
+
+    seek $rx_fh, 0, SEEK_SET;
+    seek $tx_fh, 0, SEEK_SET;
+
+    return (
+        sprintf( "%7.2fKB/s", $rx_KBytes ),
+        sprintf( "%7.2fKB/s", $tx_KBytes )
+    );
+}
+
+sub loadavg() {
+    chomp(
+        my $loadavg = do {
+            local $/;
+            <$loadavg_fh>;
+            }
+    );
+    seek $loadavg_fh, 0, SEEK_SET;
+
+    return $loadavg;
+}
+
+my $loadavg = loadavg();
+my ( $rx_KBytes, $tx_KBytes ) = ifstat();
+
+my $meminfo = sprintf( "%.2f/%.2f",
+    ( &freemem /  ( 1024 * 1000 ) ),
+    ( &totalmem / ( 1024 * 1000 ) ) );
+my $date = strftime( "%F %X", gmtime() );
+
+printf "rx %s tx %s inet4 %s inte6 %s %sMiB %s %s", $rx_KBytes, $tx_KBytes,
+    $ip4, $ip6, $meminfo, $loadavg, $date;
+
